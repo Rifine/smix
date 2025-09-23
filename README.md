@@ -13,7 +13,7 @@ Lets you pick the resize filter (nearest, bilinear, lanczos3 ...)
 # Quick Start
 ```bash
 # 1. clone this repository
-git clone ...
+git clone https://github.com/Rifine/smix.git
 cd smix
 
 # 2. build
