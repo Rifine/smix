@@ -1,37 +1,34 @@
-Blend three RGBA masks by user-supplied weights and export multi-scale PNGs.
+根据用户提供的权重值混合三个RGBA蒙版，并导出多分辨率PNG图像。
 
-## Why?
-I wrote `smix` to automate the boring part of mod-making for **_`Slay the Spire`_**: creating the coloured, multi-resolution **`card-background textures`** the game expects.
-Instead of hand-painting dozens of variants, I drop three `official card-back images` into the mask folder, tweak a few weights, and let the tool spit out crisp PNGs at every scale the engine needs.
-Perfect for batch-producing glossy green Skill backs, fiery red Attack backs, or any custom colour you can dream up.
+## 为什么开发这个工具？
+我开发了`smix`，旨在自动化《Slay the Spire》模组开发中繁琐的部分：生成游戏所需的彩色多分辨率卡牌背景纹理。
+以往，为了制作各种卡牌背景，我需要手动绘制几十个版本。现在，我只需将三个官方卡牌背景图像放入蒙版文件夹，调整几个权重值，工具就能自动生成所有所需分辨率的清晰PNG图像。
+非常适合批量生成各种颜色的卡牌背景。尽管没什么很大的用处！
 
-## What it does
-Blends three RGBA masks  with user-supplied RGB weights (0~1)
-Exports multiple resolutions in one run (1x, 2x, 0.5x ...)
-Lets you pick the resize filter (nearest, bilinear, lanczos3 ...)
+## 功能概述
+根据用户提供的RGB权重值（0~1）混合三个RGBA蒙版。
+一次性导出多种分辨率的图像（1倍、2倍、0.5倍等）。
+支持选择不同的图像缩放算法（最近邻、双线性、Lanczos3等）。
 
-# Quick Start
+# 快速入门
 ```bash
-# 1. clone this repository
+# 1. 克隆此仓库
 git clone https://github.com/Rifine/smix.git
 cd smix
 
-# 2. build
+# 2. 构建
 cargo install --path ./cli
 
-# 3. extract or copy the mask images (r.png, g.png, b.png) so you have:
+# 3. 提取或复制蒙版图像（r.png、g.png、b.png），确保目录结构如下：
 #   mask/r.png
 #   mask/g.png
 #   mask/b.png
-# All must be the same size.
+# 所有图像必须尺寸相同。
 
-# 4. run
+# 4. 运行
 smix 1.0 0.15 0.04 \
-    --mask-directories mask \
-    --scale 1 2 0.5 \
-    --filter lanczos3 \
-    --output ./results
+--mask-directories mask \
+--scale 1 2 0.5 \
+--filter lanczos3 \
+--output ./results
 ```
-
-## Contributing
-Pull requests welcome — especially presets for other Sts mods!
