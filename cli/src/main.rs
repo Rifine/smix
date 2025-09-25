@@ -1,10 +1,13 @@
-use std::{collections::HashMap, io::{stdout, Write}, path::{Path, PathBuf}};
+use std::{collections::HashMap, io::{stdout, Write}, path::{PathBuf}};
 
-use anyhow::{ensure, Ok};
+use anyhow::{ensure};
 use clap::{Parser, ValueEnum};
-use image::{open, Rgba, Rgba32FImage, RgbaImage};
-use smix::{mix_pixel};
+use eframe::egui;
+use smix::{Mask};
 
+use crate::gui::PreView;
+
+pub mod gui;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Image mixer (RGB channels only)", long_about = None)]
@@ -30,34 +33,27 @@ pub struct Args {
 
     /// Resize filter used when scaling masks.
     #[arg(short, long, value_enum, default_value_t = Filter::Lanczos3)]
-    filter: Filter
+    filter: Filter,
+
+    /// Setup a preview gui
+    #[arg(short, long, default_value = "true")]
+    preview: bool
 }
 
 fn main() -> anyhow::Result<()> {
-    let mut tool = Tool::new();
+    let mut env = Env::new();
 
-    tool.ensure_args()?;
+    env.ensure_args()?;
 
-    tool.load_mask()?;
+    env.load_mask()?;
 
-    tool.generate()?;
+    if env.args.preview {
+        return env.preview();
+    } else {
+        env.generate()?;
+    }
 
     Ok(())
-}
-
-pub fn f32img_to_u8img(src: Rgba32FImage) -> RgbaImage {
-    let (w, h) = src.dimensions();
-    let mut dst = RgbaImage::new(w, h);
-    for (x, y, p) in src.enumerate_pixels() {
-        let [r, g, b, a] = p.0;
-        dst.put_pixel(x, y, Rgba([
-            (r.clamp(0.0, 1.0) * 255.0).round() as u8,
-            (g.clamp(0.0, 1.0) * 255.0).round() as u8,
-            (b.clamp(0.0, 1.0) * 255.0).round() as u8,
-            (a.clamp(0.0, 1.0) * 255.0).round() as u8
-        ]));
-    };
-    dst
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -87,55 +83,42 @@ impl Into<image::imageops::FilterType> for Filter {
     }
 }
 
-pub struct Mask([Rgba32FImage; 3]);
-
-impl Mask {
-    pub fn new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let path = path.as_ref();
-        Ok(Self([
-            open(path.join("r.png"))?.into_rgba32f(),
-            open(path.join("g.png"))?.into_rgba32f(),
-            open(path.join("b.png"))?.into_rgba32f()
-        ]))
-    }
-
-    pub fn good(&self) -> bool {
-        self.0[0].dimensions() == self.0[1].dimensions() && self.0[1].dimensions() == self.0[2].dimensions()
-    }
-
-    pub fn generate(self, weight: &[f32; 3]) -> RgbaImage {
-        let (width, height) = self.0[0].dimensions();
-        let mut image = Rgba32FImage::new(width, height);
-        for (x, y, p) in image.enumerate_pixels_mut() {
-            let alpha = self.0[0].get_pixel(x, y).0[3];
-            p.0[3] = if alpha == 0.0 { continue } else { alpha };
-            let mask = [
-                self.0[0].get_pixel(x, y).0,
-                self.0[1].get_pixel(x, y).0,
-                self.0[2].get_pixel(x, y).0,
-            ];
-            mix_pixel(&mut p.0, &weight, &mask);
-        }
-        f32img_to_u8img(image)
-    }
-}
-
-pub struct Tool {
+pub struct Env {
     args: Args,
-    images: HashMap<String, RgbaImage>,
+    masks: HashMap<String, Mask>,
 }
 
-impl Tool {
+impl Env {
     pub fn new() -> Self {
         Self {
             args: Args::parse(),
-            images: HashMap::new(),
+            masks: HashMap::new(),
         }
     }
 
+    pub fn preview(self) -> anyhow::Result<()> {
+        let options = eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_min_inner_size([768.0, 512.0]).into(),
+            ..Default::default()
+        };
+        let _ = eframe::run_native(
+            "smix preview",
+            options,
+            Box::new(|_cc| Ok(
+                Box::new(
+                    PreView::new([self.args.r, self.args.g, self.args.b], self.masks)
+                )
+            )
+        ));
+        Ok(())
+    }
+
     pub fn generate(self) -> anyhow::Result<()> {
+        let weight = &[self.args.r, self.args.g, self.args.b];
         for (i, &s) in self.args.scale.iter().enumerate() {
-            for (name, img) in &self.images {
+            for (name, mask) in &self.masks {
+                let img = mask.generate(weight);
                 if s < 0.0 {
                     println!("Scale factor should be positive, but {s} at {i} is negative");
                     continue;
@@ -143,15 +126,14 @@ impl Tool {
                 let (width, height) = img.dimensions();
                 let nwidth = (width as f32 * s) as u32;
                 let nheight = (height as f32 * s) as u32;
+                let output_name = img.export_name(&name, nwidth, nheight);
 
-                let output_name = format!("{}_{nwidth}x{nheight}.png", name);
-            
                 print!("Generating {output_name}...");
                 stdout().flush()?;
                 if s == 1.0 {
                     img.save(self.args.output.join(output_name))?;
                 } else {
-                    image::imageops::resize(img, nwidth, nheight, self.args.filter.into()).save(self.args.output.join(output_name))?;
+                    img.save_as(self.args.output.join(output_name), nwidth, nheight, self.args.filter.into())?;
                 }
                 println!("done");
             }
@@ -160,16 +142,11 @@ impl Tool {
     }
 
     pub fn load_mask(&mut self) -> anyhow::Result<()> {
-        let weight = &[self.args.r, self.args.g, self.args.b];
         for path in &self.args.mask_directories {
             let mask = Mask::new(&path)?;
-            if mask.good() {
-                let name = format!("{}", path.display());
-                let name = name.split("/").last().unwrap_or("result");
-                self.images.insert(name.into(), mask.generate(weight));
-            } else {
-                return Err(anyhow::anyhow!("mask: {} has different demensions", path.display()))
-            }
+            let name = format!("{}", path.display());
+            let name = name.split("/").last().unwrap_or("result");
+            self.masks.insert(name.into(), mask);
         }
         Ok(())
     }
